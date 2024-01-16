@@ -1,0 +1,80 @@
+_schema-version: '3.1'
+ID: FIRST_CAP_APP
+version: 1.0.0
+description: "A simple CAP project."
+parameters:
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npx cds build --production
+modules:
+  - name: FIRST_CAP_APP-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      buildpack: nodejs_buildpack
+    build-parameters:
+      builder: npm
+    provides:
+      - name: srv-api # required by consumers of CAP services (e.g. approuter)
+        properties:
+          srv-url: ${default-url}
+    requires:
+      - name: FIRST_CAP_APP-auth
+      - name: FIRST_CAP_APP-db
+      - name: FIRST_CAP_APP-messaging
+      - name: FIRST_CAP_APP-logging
+
+  - name: FIRST_CAP_APP-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+    requires:
+      - name: FIRST_CAP_APP-db
+
+  - name: FIRST_CAP_APP
+    type: approuter.nodejs
+    path: app/
+    parameters:
+      keep-existing-routes: true
+      disk-quota: 256M
+      memory: 256M
+    requires:
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api # must be used in xs-app.json as well
+          url: ~{srv-url}
+          forwardAuthToken: true
+      - name: FIRST_CAP_APP-auth
+      - name: FIRST_CAP_APP-logging
+
+resources:
+  - name: FIRST_CAP_APP-auth
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      config:
+        xsappname: FIRST_CAP_APP-${org}-${space}
+        tenant-mode: dedicated
+  - name: FIRST_CAP_APP-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+  - name: FIRST_CAP_APP-messaging
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: enterprise-messaging
+      service-plan: default
+      path: ./event-mesh.json
+  - name: FIRST_CAP_APP-logging
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: application-logs
+      service-plan: standard
